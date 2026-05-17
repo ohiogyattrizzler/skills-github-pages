@@ -4913,6 +4913,9 @@ async function _vcStartCall(targetRole){
         }
         var localVid=document.getElementById('vcLocalVideo');
         if(localVid){localVid.srcObject=_vcLocalStream;localVid.play().catch(function(){});}
+        _vcRemoteStream=new MediaStream();
+        var rv=document.getElementById('vcRemoteVideo');
+        if(rv){rv.srcObject=_vcRemoteStream;rv.play().catch(function(){});}
         _vcResetStatusStyle();
         var s2=document.getElementById('vcStatus');
         if(s2){s2.innerHTML='';s2.textContent='Connecting...';}
@@ -4928,13 +4931,14 @@ async function _vcStartCall(targetRole){
     localVid.play().catch(function(){});
   }
 
-  _vcSetupCallerPeer(targetRole,remoteName);
-}
+  _vcRemoteStream=new MediaStream();
+  var remoteVid=document.getElementById('vcRemoteVideo');
+  if(remoteVid){
+    remoteVid.srcObject=_vcRemoteStream;
+    remoteVid.play().catch(function(){});
+  }
 
-function _vcPlayVideo(el){
-  if(!el)return;
-  var p=el.play();
-  if(p&&p.catch)p.catch(function(){setTimeout(function(){el.play().catch(function(){})},500)});
+  _vcSetupCallerPeer(targetRole,remoteName);
 }
 
 async function _vcSetupCallerPeer(targetRole,remoteName){
@@ -4948,19 +4952,16 @@ async function _vcSetupCallerPeer(targetRole,remoteName){
   var remoteVid=document.getElementById('vcRemoteVideo');
   var _timerStarted=false;
   _vcPeerConnection.ontrack=function(event){
-    if(event.streams&&event.streams[0]){
-      _vcRemoteStream=event.streams[0];
-      if(remoteVid){
-        remoteVid.srcObject=event.streams[0];
-        _vcPlayVideo(remoteVid);
-      }
-    }else{
-      if(!_vcRemoteStream)_vcRemoteStream=new MediaStream();
-      _vcRemoteStream.addTrack(event.track);
-      if(remoteVid){
-        remoteVid.srcObject=_vcRemoteStream;
-        _vcPlayVideo(remoteVid);
-      }
+    var track=event.track;
+    if(_vcRemoteStream){
+      var existing=_vcRemoteStream.getTracks();
+      var dominated=false;
+      for(var i=0;i<existing.length;i++){if(existing[i].id===track.id){dominated=true;break;}}
+      if(!dominated)_vcRemoteStream.addTrack(track);
+    }
+    if(remoteVid&&!remoteVid.srcObject){
+      remoteVid.srcObject=_vcRemoteStream;
+      remoteVid.play().catch(function(){});
     }
     var st=document.getElementById('vcStatus');
     if(st)st.textContent='';
@@ -5066,6 +5067,9 @@ async function _vcAnswerCall(callId,callerRole,callerName){
         }
         var localVid=document.getElementById('vcLocalVideo');
         if(localVid){localVid.srcObject=_vcLocalStream;localVid.play().catch(function(){});}
+        _vcRemoteStream=new MediaStream();
+        var rv=document.getElementById('vcRemoteVideo');
+        if(rv){rv.srcObject=_vcRemoteStream;rv.play().catch(function(){});}
         _vcResetStatusStyle();
         var s2=document.getElementById('vcStatus');
         if(s2){s2.innerHTML='';s2.textContent='Connecting...';}
@@ -5082,6 +5086,13 @@ async function _vcAnswerCall(callId,callerRole,callerName){
   if(localVid){
     localVid.srcObject=_vcLocalStream;
     localVid.play().catch(function(){});
+  }
+
+  _vcRemoteStream=new MediaStream();
+  var remoteVid=document.getElementById('vcRemoteVideo');
+  if(remoteVid){
+    remoteVid.srcObject=_vcRemoteStream;
+    remoteVid.play().catch(function(){});
   }
 
   _vcSetupAnswerPeer(callId,callerRole,callerName);
@@ -5107,19 +5118,16 @@ async function _vcSetupAnswerPeer(callId,callerRole,callerName){
   var remoteVid=document.getElementById('vcRemoteVideo');
   var _timerStarted=false;
   _vcPeerConnection.ontrack=function(event){
-    if(event.streams&&event.streams[0]){
-      _vcRemoteStream=event.streams[0];
-      if(remoteVid){
-        remoteVid.srcObject=event.streams[0];
-        _vcPlayVideo(remoteVid);
-      }
-    }else{
-      if(!_vcRemoteStream)_vcRemoteStream=new MediaStream();
-      _vcRemoteStream.addTrack(event.track);
-      if(remoteVid){
-        remoteVid.srcObject=_vcRemoteStream;
-        _vcPlayVideo(remoteVid);
-      }
+    var track=event.track;
+    if(_vcRemoteStream){
+      var existing=_vcRemoteStream.getTracks();
+      var dominated=false;
+      for(var i=0;i<existing.length;i++){if(existing[i].id===track.id){dominated=true;break;}}
+      if(!dominated)_vcRemoteStream.addTrack(track);
+    }
+    if(remoteVid&&!remoteVid.srcObject){
+      remoteVid.srcObject=_vcRemoteStream;
+      remoteVid.play().catch(function(){});
     }
     var st=document.getElementById('vcStatus');
     if(st)st.textContent='';
