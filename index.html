@@ -4731,6 +4731,8 @@ var _vcLocalStream=null;
 var _vcRemoteStream=null;
 var _vcAudioContext=null;
 var _vcAudioSource=null;
+var _vcRemoteAudioStream=null;
+var _vcRemoteAudioEl=null;
 var _vcInCall=false;
 var _vcIsCaller=false;
 var _vcTargetRole=null;
@@ -4814,6 +4816,9 @@ function _vcCleanupCall(){
   _vcRemoteStream=null;
   if(_vcAudioSource){try{_vcAudioSource.disconnect();}catch(e){}_vcAudioSource=null;}
   if(_vcAudioContext){try{_vcAudioContext.close();}catch(e){}_vcAudioContext=null;}
+  if(_vcRemoteAudioEl&&_vcRemoteAudioEl.parentNode){_vcRemoteAudioEl.parentNode.removeChild(_vcRemoteAudioEl);}
+  _vcRemoteAudioEl=null;
+  _vcRemoteAudioStream=null;
   _vcPendingCandidates=[];
   var localVid=document.getElementById('vcLocalVideo');
   var remoteVid=document.getElementById('vcRemoteVideo');
@@ -4900,9 +4905,19 @@ function _vcUnlockAudio(){
     _vcAudioContext=new(window.AudioContext||window.webkitAudioContext)();
     _vcAudioContext.resume();
   }catch(e){}
+  _vcRemoteAudioStream=new MediaStream();
+  var audioEl=document.createElement('audio');
+  audioEl.id='vcRemoteAudio';
+  audioEl.autoplay=true;
+  audioEl.setAttribute('playsinline','');
+  audioEl.style.display='none';
+  document.body.appendChild(audioEl);
+  audioEl.srcObject=_vcRemoteAudioStream;
+  audioEl.play().catch(function(){});
+  _vcRemoteAudioEl=audioEl;
   _vcRemoteStream=new MediaStream();
   var rv=document.getElementById('vcRemoteVideo');
-  if(rv){rv.srcObject=_vcRemoteStream;rv.play().catch(function(){});}
+  if(rv){rv.srcObject=_vcRemoteStream;rv.muted=true;rv.play().catch(function(){});}
 }
 
 async function _vcStartCall(targetRole){
@@ -4959,17 +4974,30 @@ async function _vcSetupCallerPeer(targetRole,remoteName){
   var _timerStarted=false;
   _vcPeerConnection.ontrack=function(event){
     var track=event.track;
-    if(track.kind==='audio'&&_vcAudioContext){
-      try{
-        var audioStream=new MediaStream([track]);
-        _vcAudioSource=_vcAudioContext.createMediaStreamSource(audioStream);
-        _vcAudioSource.connect(_vcAudioContext.destination);
-      }catch(e){}
+    console.log('[VC] ontrack:',track.kind,'enabled:',track.enabled,'readyState:',track.readyState);
+    if(track.kind==='audio'){
+      if(_vcRemoteAudioStream){
+        _vcRemoteAudioStream.addTrack(track);
+        console.log('[VC] audio track added to audio element stream');
+      }
+      if(_vcRemoteAudioEl){
+        _vcRemoteAudioEl.play().catch(function(e){console.log('[VC] audio play error:',e)});
+      }
+      if(_vcAudioContext){
+        try{
+          _vcAudioContext.resume();
+          var as=new MediaStream([track]);
+          _vcAudioSource=_vcAudioContext.createMediaStreamSource(as);
+          _vcAudioSource.connect(_vcAudioContext.destination);
+          console.log('[VC] audio routed through Web Audio API, ctx state:',_vcAudioContext.state);
+        }catch(e){console.log('[VC] WebAudio error:',e)}
+      }
     }
-    if(track.kind==='video'&&_vcRemoteStream){
-      _vcRemoteStream.addTrack(track);
+    if(track.kind==='video'){
+      if(_vcRemoteStream)_vcRemoteStream.addTrack(track);
       if(remoteVid){
         remoteVid.srcObject=_vcRemoteStream;
+        remoteVid.muted=true;
         remoteVid.play().catch(function(){});
       }
     }
@@ -5121,17 +5149,30 @@ async function _vcSetupAnswerPeer(callId,callerRole,callerName){
   var _timerStarted=false;
   _vcPeerConnection.ontrack=function(event){
     var track=event.track;
-    if(track.kind==='audio'&&_vcAudioContext){
-      try{
-        var audioStream=new MediaStream([track]);
-        _vcAudioSource=_vcAudioContext.createMediaStreamSource(audioStream);
-        _vcAudioSource.connect(_vcAudioContext.destination);
-      }catch(e){}
+    console.log('[VC] ontrack(answer):',track.kind,'enabled:',track.enabled,'readyState:',track.readyState);
+    if(track.kind==='audio'){
+      if(_vcRemoteAudioStream){
+        _vcRemoteAudioStream.addTrack(track);
+        console.log('[VC] audio track added to audio element stream');
+      }
+      if(_vcRemoteAudioEl){
+        _vcRemoteAudioEl.play().catch(function(e){console.log('[VC] audio play error:',e)});
+      }
+      if(_vcAudioContext){
+        try{
+          _vcAudioContext.resume();
+          var as=new MediaStream([track]);
+          _vcAudioSource=_vcAudioContext.createMediaStreamSource(as);
+          _vcAudioSource.connect(_vcAudioContext.destination);
+          console.log('[VC] audio routed through Web Audio API, ctx state:',_vcAudioContext.state);
+        }catch(e){console.log('[VC] WebAudio error:',e)}
+      }
     }
-    if(track.kind==='video'&&_vcRemoteStream){
-      _vcRemoteStream.addTrack(track);
+    if(track.kind==='video'){
+      if(_vcRemoteStream)_vcRemoteStream.addTrack(track);
       if(remoteVid){
         remoteVid.srcObject=_vcRemoteStream;
+        remoteVid.muted=true;
         remoteVid.play().catch(function(){});
       }
     }
