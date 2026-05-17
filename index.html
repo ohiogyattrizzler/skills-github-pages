@@ -4729,6 +4729,8 @@ var _vcIconPhoneOn='<svg width="28" height="28" viewBox="0 0 24 24" fill="curren
 var _vcPeerConnection=null;
 var _vcLocalStream=null;
 var _vcRemoteStream=null;
+var _vcAudioContext=null;
+var _vcAudioSource=null;
 var _vcInCall=false;
 var _vcIsCaller=false;
 var _vcTargetRole=null;
@@ -4810,6 +4812,8 @@ function _vcCleanupCall(){
     _vcLocalStream=null;
   }
   _vcRemoteStream=null;
+  if(_vcAudioSource){try{_vcAudioSource.disconnect();}catch(e){}_vcAudioSource=null;}
+  if(_vcAudioContext){try{_vcAudioContext.close();}catch(e){}_vcAudioContext=null;}
   _vcPendingCandidates=[];
   var localVid=document.getElementById('vcLocalVideo');
   var remoteVid=document.getElementById('vcRemoteVideo');
@@ -4891,6 +4895,16 @@ function _vcResetStatusStyle(){
   status.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,255,255,.7);font-size:15px;font-weight:600;text-align:center;z-index:3;pointer-events:none';
 }
 
+function _vcUnlockAudio(){
+  try{
+    _vcAudioContext=new(window.AudioContext||window.webkitAudioContext)();
+    _vcAudioContext.resume();
+  }catch(e){}
+  _vcRemoteStream=new MediaStream();
+  var rv=document.getElementById('vcRemoteVideo');
+  if(rv){rv.srcObject=_vcRemoteStream;rv.play().catch(function(){});}
+}
+
 async function _vcStartCall(targetRole){
   if(_vcInCall||!currentRole)return;
   _vcInCall=true;
@@ -4898,6 +4912,8 @@ async function _vcStartCall(targetRole){
   _vcTargetRole=targetRole;
   var remoteName=(onlineUsers[targetRole]&&onlineUsers[targetRole].name)||targetRole;
   _vcShowVideoUI(remoteName);
+
+  _vcUnlockAudio();
 
   _vcLocalStream=await _vcGetMedia();
   if(!_vcLocalStream){
@@ -4913,9 +4929,6 @@ async function _vcStartCall(targetRole){
         }
         var localVid=document.getElementById('vcLocalVideo');
         if(localVid){localVid.srcObject=_vcLocalStream;localVid.play().catch(function(){});}
-        _vcRemoteStream=new MediaStream();
-        var rv=document.getElementById('vcRemoteVideo');
-        if(rv){rv.srcObject=_vcRemoteStream;rv.play().catch(function(){});}
         _vcResetStatusStyle();
         var s2=document.getElementById('vcStatus');
         if(s2){s2.innerHTML='';s2.textContent='Connecting...';}
@@ -4929,13 +4942,6 @@ async function _vcStartCall(targetRole){
   if(localVid){
     localVid.srcObject=_vcLocalStream;
     localVid.play().catch(function(){});
-  }
-
-  _vcRemoteStream=new MediaStream();
-  var remoteVid=document.getElementById('vcRemoteVideo');
-  if(remoteVid){
-    remoteVid.srcObject=_vcRemoteStream;
-    remoteVid.play().catch(function(){});
   }
 
   _vcSetupCallerPeer(targetRole,remoteName);
@@ -4953,15 +4959,19 @@ async function _vcSetupCallerPeer(targetRole,remoteName){
   var _timerStarted=false;
   _vcPeerConnection.ontrack=function(event){
     var track=event.track;
-    if(_vcRemoteStream){
-      var existing=_vcRemoteStream.getTracks();
-      var dominated=false;
-      for(var i=0;i<existing.length;i++){if(existing[i].id===track.id){dominated=true;break;}}
-      if(!dominated)_vcRemoteStream.addTrack(track);
+    if(track.kind==='audio'&&_vcAudioContext){
+      try{
+        var audioStream=new MediaStream([track]);
+        _vcAudioSource=_vcAudioContext.createMediaStreamSource(audioStream);
+        _vcAudioSource.connect(_vcAudioContext.destination);
+      }catch(e){}
     }
-    if(remoteVid&&!remoteVid.srcObject){
-      remoteVid.srcObject=_vcRemoteStream;
-      remoteVid.play().catch(function(){});
+    if(track.kind==='video'&&_vcRemoteStream){
+      _vcRemoteStream.addTrack(track);
+      if(remoteVid){
+        remoteVid.srcObject=_vcRemoteStream;
+        remoteVid.play().catch(function(){});
+      }
     }
     var st=document.getElementById('vcStatus');
     if(st)st.textContent='';
@@ -5050,6 +5060,8 @@ async function _vcAnswerCall(callId,callerRole,callerName){
   openApp('videocall');
   setTimeout(function(){_vcShowVideoUI(callerName||callerRole)},50);
 
+  _vcUnlockAudio();
+
   _vcLocalStream=await _vcGetMedia();
   if(!_vcLocalStream){
     _vcShowPermissionError(
@@ -5067,9 +5079,6 @@ async function _vcAnswerCall(callId,callerRole,callerName){
         }
         var localVid=document.getElementById('vcLocalVideo');
         if(localVid){localVid.srcObject=_vcLocalStream;localVid.play().catch(function(){});}
-        _vcRemoteStream=new MediaStream();
-        var rv=document.getElementById('vcRemoteVideo');
-        if(rv){rv.srcObject=_vcRemoteStream;rv.play().catch(function(){});}
         _vcResetStatusStyle();
         var s2=document.getElementById('vcStatus');
         if(s2){s2.innerHTML='';s2.textContent='Connecting...';}
@@ -5086,13 +5095,6 @@ async function _vcAnswerCall(callId,callerRole,callerName){
   if(localVid){
     localVid.srcObject=_vcLocalStream;
     localVid.play().catch(function(){});
-  }
-
-  _vcRemoteStream=new MediaStream();
-  var remoteVid=document.getElementById('vcRemoteVideo');
-  if(remoteVid){
-    remoteVid.srcObject=_vcRemoteStream;
-    remoteVid.play().catch(function(){});
   }
 
   _vcSetupAnswerPeer(callId,callerRole,callerName);
@@ -5119,15 +5121,19 @@ async function _vcSetupAnswerPeer(callId,callerRole,callerName){
   var _timerStarted=false;
   _vcPeerConnection.ontrack=function(event){
     var track=event.track;
-    if(_vcRemoteStream){
-      var existing=_vcRemoteStream.getTracks();
-      var dominated=false;
-      for(var i=0;i<existing.length;i++){if(existing[i].id===track.id){dominated=true;break;}}
-      if(!dominated)_vcRemoteStream.addTrack(track);
+    if(track.kind==='audio'&&_vcAudioContext){
+      try{
+        var audioStream=new MediaStream([track]);
+        _vcAudioSource=_vcAudioContext.createMediaStreamSource(audioStream);
+        _vcAudioSource.connect(_vcAudioContext.destination);
+      }catch(e){}
     }
-    if(remoteVid&&!remoteVid.srcObject){
-      remoteVid.srcObject=_vcRemoteStream;
-      remoteVid.play().catch(function(){});
+    if(track.kind==='video'&&_vcRemoteStream){
+      _vcRemoteStream.addTrack(track);
+      if(remoteVid){
+        remoteVid.srcObject=_vcRemoteStream;
+        remoteVid.play().catch(function(){});
+      }
     }
     var st=document.getElementById('vcStatus');
     if(st)st.textContent='';
