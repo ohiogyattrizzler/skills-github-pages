@@ -4839,6 +4839,56 @@ function _vcRemoveIncomingOverlay(){
   if(_vcRingtoneInterval){clearInterval(_vcRingtoneInterval);_vcRingtoneInterval=null;}
 }
 
+async function _vcGetMedia(){
+  try{
+    var stream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+    return stream;
+  }catch(e1){
+    try{
+      var stream=await navigator.mediaDevices.getUserMedia({video:false,audio:true});
+      return stream;
+    }catch(e2){
+      return null;
+    }
+  }
+}
+
+function _vcShowPermissionError(onRetry,onCancel){
+  var status=document.getElementById('vcStatus');
+  if(!status)return;
+  status.innerHTML='';
+  var box=document.createElement('div');
+  box.style.cssText='text-align:center;padding:20px';
+  box.innerHTML=
+    '<div style="font-size:40px;margin-bottom:12px">🎥</div>'+
+    '<div style="font-size:16px;font-weight:700;color:#fff;margin-bottom:8px">Camera & Microphone Access Needed</div>'+
+    '<div style="font-size:13px;color:rgba(255,255,255,.6);margin-bottom:6px;line-height:1.5">'+
+      'Your browser blocked camera/mic access.<br>To fix this:'+
+    '</div>'+
+    '<div style="text-align:left;display:inline-block;font-size:12px;color:rgba(255,255,255,.5);line-height:1.8;margin-bottom:16px">'+
+      '1. Click the <b style="color:#fff">lock/camera icon</b> in your address bar<br>'+
+      '2. Set Camera and Microphone to <b style="color:#fff">Allow</b><br>'+
+      '3. Click <b style="color:#fff">Retry</b> below'+
+    '</div><br>'+
+    '<button id="vcRetryPermBtn" style="padding:8px 24px;border-radius:20px;border:none;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-weight:700;font-size:13px;cursor:pointer;margin-right:8px">Retry</button>'+
+    '<button id="vcCancelPermBtn" style="padding:8px 24px;border-radius:20px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.1);color:#fff;font-weight:600;font-size:13px;cursor:pointer">Cancel</button>';
+  status.style.position='relative';
+  status.style.transform='none';
+  status.style.top='0';status.style.left='0';
+  status.style.width='100%';status.style.height='100%';
+  status.style.display='flex';status.style.alignItems='center';status.style.justifyContent='center';
+  status.style.pointerEvents='all';
+  status.appendChild(box);
+  document.getElementById('vcRetryPermBtn').onclick=onRetry;
+  document.getElementById('vcCancelPermBtn').onclick=onCancel;
+}
+
+function _vcResetStatusStyle(){
+  var status=document.getElementById('vcStatus');
+  if(!status)return;
+  status.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,255,255,.7);font-size:15px;font-weight:600;text-align:center;z-index:3;pointer-events:none';
+}
+
 async function _vcStartCall(targetRole){
   if(_vcInCall||!currentRole)return;
   _vcInCall=true;
@@ -4847,17 +4897,36 @@ async function _vcStartCall(targetRole){
   var remoteName=(onlineUsers[targetRole]&&onlineUsers[targetRole].name)||targetRole;
   _vcShowVideoUI(remoteName);
 
-  try{
-    _vcLocalStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
-    var localVid=document.getElementById('vcLocalVideo');
-    if(localVid)localVid.srcObject=_vcLocalStream;
-  }catch(e){
-    var status=document.getElementById('vcStatus');
-    if(status)status.textContent='Camera/mic access denied';
-    setTimeout(function(){_vcCleanupCall()},2000);
+  _vcLocalStream=await _vcGetMedia();
+  if(!_vcLocalStream){
+    _vcShowPermissionError(
+      async function(){
+        _vcResetStatusStyle();
+        var st=document.getElementById('vcStatus');
+        if(st){st.innerHTML='';st.textContent='Retrying...';}
+        _vcLocalStream=await _vcGetMedia();
+        if(!_vcLocalStream){
+          _vcShowPermissionError(arguments.callee,function(){_vcCleanupCall()});
+          return;
+        }
+        var localVid=document.getElementById('vcLocalVideo');
+        if(localVid)localVid.srcObject=_vcLocalStream;
+        _vcResetStatusStyle();
+        var s2=document.getElementById('vcStatus');
+        if(s2){s2.innerHTML='';s2.textContent='Connecting...';}
+        _vcSetupCallerPeer(targetRole,remoteName);
+      },
+      function(){_vcCleanupCall()}
+    );
     return;
   }
+  var localVid=document.getElementById('vcLocalVideo');
+  if(localVid)localVid.srcObject=_vcLocalStream;
 
+  _vcSetupCallerPeer(targetRole,remoteName);
+}
+
+async function _vcSetupCallerPeer(targetRole,remoteName){
   _vcPeerConnection=new RTCPeerConnection(_vcIceServers);
   _vcRemoteStream=new MediaStream();
   var remoteVid=document.getElementById('vcRemoteVideo');
@@ -4945,17 +5014,42 @@ async function _vcAnswerCall(callId,callerRole,callerName){
 
   openApp('videocall');
 
-  try{
-    _vcLocalStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
-    var localVid=document.getElementById('vcLocalVideo');
-    if(localVid)localVid.srcObject=_vcLocalStream;
-  }catch(e){
-    var status=document.getElementById('vcStatus');
-    if(status)status.textContent='Camera/mic access denied';
-    setTimeout(function(){_vcCleanupCall()},2000);
+  _vcLocalStream=await _vcGetMedia();
+  if(!_vcLocalStream){
+    _vcShowPermissionError(
+      async function(){
+        _vcResetStatusStyle();
+        var st=document.getElementById('vcStatus');
+        if(st){st.innerHTML='';st.textContent='Retrying...';}
+        _vcLocalStream=await _vcGetMedia();
+        if(!_vcLocalStream){
+          _vcShowPermissionError(arguments.callee,function(){
+            db.ref('videoCalls/'+callId+'/status').set('ended');
+            _vcCleanupCall();
+          });
+          return;
+        }
+        var localVid=document.getElementById('vcLocalVideo');
+        if(localVid)localVid.srcObject=_vcLocalStream;
+        _vcResetStatusStyle();
+        var s2=document.getElementById('vcStatus');
+        if(s2){s2.innerHTML='';s2.textContent='Connecting...';}
+        _vcSetupAnswerPeer(callId,callerRole,callerName);
+      },
+      function(){
+        db.ref('videoCalls/'+callId+'/status').set('ended');
+        _vcCleanupCall();
+      }
+    );
     return;
   }
+  var localVid=document.getElementById('vcLocalVideo');
+  if(localVid)localVid.srcObject=_vcLocalStream;
 
+  _vcSetupAnswerPeer(callId,callerRole,callerName);
+}
+
+async function _vcSetupAnswerPeer(callId,callerRole,callerName){
   var callRef=db.ref('videoCalls/'+callId);
   _vcCallRef=callRef;
 
