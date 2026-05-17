@@ -4734,6 +4734,7 @@ var _vcIsCaller=false;
 var _vcTargetRole=null;
 var _vcMuted=false;
 var _vcCamOff=false;
+var _vcPendingCandidates=[];
 var _vcTimerInterval=null;
 var _vcTimerSeconds=0;
 var _vcCallRef=null;
@@ -4809,6 +4810,7 @@ function _vcCleanupCall(){
     _vcLocalStream=null;
   }
   _vcRemoteStream=null;
+  _vcPendingCandidates=[];
   var localVid=document.getElementById('vcLocalVideo');
   var remoteVid=document.getElementById('vcRemoteVideo');
   if(localVid)localVid.srcObject=null;
@@ -4910,7 +4912,7 @@ async function _vcStartCall(targetRole){
           return;
         }
         var localVid=document.getElementById('vcLocalVideo');
-        if(localVid)localVid.srcObject=_vcLocalStream;
+        if(localVid){localVid.srcObject=_vcLocalStream;localVid.play().catch(function(){});}
         _vcResetStatusStyle();
         var s2=document.getElementById('vcStatus');
         if(s2){s2.innerHTML='';s2.textContent='Connecting...';}
@@ -4921,28 +4923,48 @@ async function _vcStartCall(targetRole){
     return;
   }
   var localVid=document.getElementById('vcLocalVideo');
-  if(localVid)localVid.srcObject=_vcLocalStream;
+  if(localVid){
+    localVid.srcObject=_vcLocalStream;
+    localVid.play().catch(function(){});
+  }
 
   _vcSetupCallerPeer(targetRole,remoteName);
 }
 
+function _vcPlayVideo(el){
+  if(!el)return;
+  var p=el.play();
+  if(p&&p.catch)p.catch(function(){setTimeout(function(){el.play().catch(function(){})},500)});
+}
+
 async function _vcSetupCallerPeer(targetRole,remoteName){
+  _vcPendingCandidates=[];
   _vcPeerConnection=new RTCPeerConnection(_vcIceServers);
-  _vcRemoteStream=new MediaStream();
-  var remoteVid=document.getElementById('vcRemoteVideo');
-  if(remoteVid)remoteVid.srcObject=_vcRemoteStream;
 
   _vcLocalStream.getTracks().forEach(function(track){
     _vcPeerConnection.addTrack(track,_vcLocalStream);
   });
 
+  var remoteVid=document.getElementById('vcRemoteVideo');
+  var _timerStarted=false;
   _vcPeerConnection.ontrack=function(event){
-    event.streams[0].getTracks().forEach(function(track){
-      _vcRemoteStream.addTrack(track);
-    });
+    if(event.streams&&event.streams[0]){
+      _vcRemoteStream=event.streams[0];
+      if(remoteVid){
+        remoteVid.srcObject=event.streams[0];
+        _vcPlayVideo(remoteVid);
+      }
+    }else{
+      if(!_vcRemoteStream)_vcRemoteStream=new MediaStream();
+      _vcRemoteStream.addTrack(event.track);
+      if(remoteVid){
+        remoteVid.srcObject=_vcRemoteStream;
+        _vcPlayVideo(remoteVid);
+      }
+    }
     var st=document.getElementById('vcStatus');
     if(st)st.textContent='';
-    _vcStartTimer();
+    if(!_timerStarted){_timerStarted=true;_vcStartTimer();}
   };
 
   var callId=_vcGetCallId(currentRole,targetRole);
@@ -4956,12 +4978,19 @@ async function _vcSetupCallerPeer(targetRole,remoteName){
   };
 
   _vcPeerConnection.onconnectionstatechange=function(){
-    if(_vcPeerConnection&&(_vcPeerConnection.connectionState==='disconnected'||_vcPeerConnection.connectionState==='failed'||_vcPeerConnection.connectionState==='closed')){
-      _vcCleanupCall();
+    if(_vcPeerConnection){
+      var s=_vcPeerConnection.connectionState;
+      if(s==='disconnected'||s==='failed'||s==='closed')_vcCleanupCall();
+    }
+  };
+  _vcPeerConnection.oniceconnectionstatechange=function(){
+    if(_vcPeerConnection){
+      var s=_vcPeerConnection.iceConnectionState;
+      if(s==='failed'||s==='closed')_vcCleanupCall();
     }
   };
 
-  var offer=await _vcPeerConnection.createOffer();
+  var offer=await _vcPeerConnection.createOffer({offerToReceiveAudio:true,offerToReceiveVideo:true});
   await _vcPeerConnection.setLocalDescription(offer);
 
   await callRef.set({
@@ -4976,20 +5005,26 @@ async function _vcSetupCallerPeer(targetRole,remoteName){
   var statusEl=document.getElementById('vcStatus');
   if(statusEl)statusEl.textContent='Ringing '+remoteName+'...';
 
-  callRef.child('answer').on('value',function(snap){
+  callRef.child('answer').on('value',async function(snap){
     var answerData=snap.val();
     if(answerData&&_vcPeerConnection&&!_vcPeerConnection.currentRemoteDescription){
-      var answer=new RTCSessionDescription(answerData);
-      _vcPeerConnection.setRemoteDescription(answer);
+      await _vcPeerConnection.setRemoteDescription(new RTCSessionDescription(answerData));
+      for(var i=0;i<_vcPendingCandidates.length;i++){
+        try{await _vcPeerConnection.addIceCandidate(new RTCIceCandidate(_vcPendingCandidates[i]))}catch(e){}
+      }
+      _vcPendingCandidates=[];
       var st=document.getElementById('vcStatus');
       if(st)st.textContent='Connected';
     }
   });
 
   callRef.child('calleeCandidates').on('child_added',function(snap){
-    if(_vcPeerConnection){
-      var candidate=new RTCIceCandidate(snap.val());
-      _vcPeerConnection.addIceCandidate(candidate);
+    if(!_vcPeerConnection)return;
+    var c=snap.val();
+    if(_vcPeerConnection.currentRemoteDescription){
+      _vcPeerConnection.addIceCandidate(new RTCIceCandidate(c)).catch(function(){});
+    }else{
+      _vcPendingCandidates.push(c);
     }
   });
 
@@ -5030,7 +5065,7 @@ async function _vcAnswerCall(callId,callerRole,callerName){
           return;
         }
         var localVid=document.getElementById('vcLocalVideo');
-        if(localVid)localVid.srcObject=_vcLocalStream;
+        if(localVid){localVid.srcObject=_vcLocalStream;localVid.play().catch(function(){});}
         _vcResetStatusStyle();
         var s2=document.getElementById('vcStatus');
         if(s2){s2.innerHTML='';s2.textContent='Connecting...';}
@@ -5044,7 +5079,10 @@ async function _vcAnswerCall(callId,callerRole,callerName){
     return;
   }
   var localVid=document.getElementById('vcLocalVideo');
-  if(localVid)localVid.srcObject=_vcLocalStream;
+  if(localVid){
+    localVid.srcObject=_vcLocalStream;
+    localVid.play().catch(function(){});
+  }
 
   _vcSetupAnswerPeer(callId,callerRole,callerName);
 }
@@ -5061,21 +5099,31 @@ async function _vcSetupAnswerPeer(callId,callerRole,callerName){
   }
 
   _vcPeerConnection=new RTCPeerConnection(_vcIceServers);
-  _vcRemoteStream=new MediaStream();
-  var remoteVid=document.getElementById('vcRemoteVideo');
-  if(remoteVid)remoteVid.srcObject=_vcRemoteStream;
 
   _vcLocalStream.getTracks().forEach(function(track){
     _vcPeerConnection.addTrack(track,_vcLocalStream);
   });
 
+  var remoteVid=document.getElementById('vcRemoteVideo');
+  var _timerStarted=false;
   _vcPeerConnection.ontrack=function(event){
-    event.streams[0].getTracks().forEach(function(track){
-      _vcRemoteStream.addTrack(track);
-    });
+    if(event.streams&&event.streams[0]){
+      _vcRemoteStream=event.streams[0];
+      if(remoteVid){
+        remoteVid.srcObject=event.streams[0];
+        _vcPlayVideo(remoteVid);
+      }
+    }else{
+      if(!_vcRemoteStream)_vcRemoteStream=new MediaStream();
+      _vcRemoteStream.addTrack(event.track);
+      if(remoteVid){
+        remoteVid.srcObject=_vcRemoteStream;
+        _vcPlayVideo(remoteVid);
+      }
+    }
     var st=document.getElementById('vcStatus');
     if(st)st.textContent='';
-    _vcStartTimer();
+    if(!_timerStarted){_timerStarted=true;_vcStartTimer();}
   };
 
   _vcPeerConnection.onicecandidate=function(event){
@@ -5085,8 +5133,15 @@ async function _vcSetupAnswerPeer(callId,callerRole,callerName){
   };
 
   _vcPeerConnection.onconnectionstatechange=function(){
-    if(_vcPeerConnection&&(_vcPeerConnection.connectionState==='disconnected'||_vcPeerConnection.connectionState==='failed'||_vcPeerConnection.connectionState==='closed')){
-      _vcCleanupCall();
+    if(_vcPeerConnection){
+      var s=_vcPeerConnection.connectionState;
+      if(s==='disconnected'||s==='failed'||s==='closed')_vcCleanupCall();
+    }
+  };
+  _vcPeerConnection.oniceconnectionstatechange=function(){
+    if(_vcPeerConnection){
+      var s=_vcPeerConnection.iceConnectionState;
+      if(s==='failed'||s==='closed')_vcCleanupCall();
     }
   };
 
@@ -5094,13 +5149,14 @@ async function _vcSetupAnswerPeer(callId,callerRole,callerName){
 
   var callerCandSnap=await callRef.child('callerCandidates').once('value');
   var existingCandidates=callerCandSnap.val()||{};
-  Object.keys(existingCandidates).forEach(function(key){
-    _vcPeerConnection.addIceCandidate(new RTCIceCandidate(existingCandidates[key]));
-  });
+  var candKeys=Object.keys(existingCandidates);
+  for(var i=0;i<candKeys.length;i++){
+    try{await _vcPeerConnection.addIceCandidate(new RTCIceCandidate(existingCandidates[candKeys[i]]))}catch(e){}
+  }
 
   callRef.child('callerCandidates').on('child_added',function(snap){
     if(_vcPeerConnection){
-      _vcPeerConnection.addIceCandidate(new RTCIceCandidate(snap.val()));
+      _vcPeerConnection.addIceCandidate(new RTCIceCandidate(snap.val())).catch(function(){});
     }
   });
 
