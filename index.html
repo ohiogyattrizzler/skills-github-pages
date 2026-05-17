@@ -5014,7 +5014,7 @@ async function _vcSetupCallerPeer(targetRole,remoteName){
       }
       _vcPendingCandidates=[];
       var st=document.getElementById('vcStatus');
-      if(st)st.textContent='Connected';
+      if(st)st.textContent='';
     }
   });
 
@@ -5045,9 +5045,9 @@ async function _vcAnswerCall(callId,callerRole,callerName){
   _vcInCall=true;
   _vcIsCaller=false;
   _vcTargetRole=callerRole;
-  _vcShowVideoUI(callerName||callerRole);
 
   openApp('videocall');
+  setTimeout(function(){_vcShowVideoUI(callerName||callerRole)},50);
 
   _vcLocalStream=await _vcGetMedia();
   if(!_vcLocalStream){
