@@ -4841,15 +4841,13 @@ function _vcRemoveIncomingOverlay(){
   if(_vcRingtoneInterval){clearInterval(_vcRingtoneInterval);_vcRingtoneInterval=null;}
 }
 
-var _vcAudioConstraints={echoCancellation:true,noiseSuppression:true,autoGainControl:true,sampleRate:48000};
-
 async function _vcGetMedia(){
   try{
-    var stream=await navigator.mediaDevices.getUserMedia({video:true,audio:_vcAudioConstraints});
+    var stream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
     return stream;
   }catch(e1){
     try{
-      var stream=await navigator.mediaDevices.getUserMedia({video:false,audio:_vcAudioConstraints});
+      var stream=await navigator.mediaDevices.getUserMedia({video:false,audio:true});
       return stream;
     }catch(e2){
       return null;
